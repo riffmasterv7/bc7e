@@ -11,7 +11,7 @@
 #include <time.h>
 
 #include "lodepng.h"
-#include "dds_defs.h"
+#include "tex_container.h"
 #include "bc7decomp.h"
 
 #include "bc7e_ispc.h"
@@ -22,9 +22,9 @@ inline int iabs(int i) { if (i < 0) i = -i; return i; }
 static int print_usage()
 {
 	fprintf(stderr, "bc7enc - Basis SIMD BC7 encoding example program\n");
-	fprintf(stderr, "Reads PNG files (with or without alpha channels) and packs them to BC7/BPTC.\n");
+	fprintf(stderr, "Reads PNG files (with or without alpha channels), packs them to BC7/BPTC and stores in DDS or KTX container.\n");
 	fprintf(stderr, "By default, a DX10 DDS file and a unpacked PNG file will be written to the source file's directory with the .dds/_unpacked.png/_unpacked_alpha.png suffixes.\n\n");
-	fprintf(stderr, "Usage: bc7enc [-apng_filename] [-l] [-uX] [-aX] [-g] [-y] input_filename.png [compressed_output.dds] [unpacked_output.png]\n");
+	fprintf(stderr, "Usage: bc7enc [-apng_filename] [-l] [-uX] [-aX] [-g] [-y] input_filename.png [compressed_output.[dds|ktx]] [unpacked_output.png]\n");
 	fprintf(stderr, "-apng_filename Load G channel of PNG file into alpha channel of source image\n");
 	fprintf(stderr, "-l Use linear colorspace metrics instead of perceptual\n");
 	fprintf(stderr, "-uX Quality level. X ranges from [0,6], higher=slower, default is 3\n");
@@ -305,74 +305,6 @@ public:
 	}
 };
 
-struct bc7_block
-{
-	uint64_t m_vals[2];
-};
-
-typedef std::vector<bc7_block> bc7_block_vec;
-
-static bool save_bc7_dds(const char *pFilename, uint32_t width, uint32_t height, const bc7_block *pBlocks, bool srgb)
-{
-	(void)srgb;
-
-	FILE *pFile = NULL;
-	pFile = fopen(pFilename, "wb");
-	if (!pFile)
-	{
-		fprintf(stderr, "Failed creating file %s!\n", pFilename);
-		return false;
-	}
-
-	fwrite("DDS ", 4, 1, pFile);
-
-	DDSURFACEDESC2 desc;
-	memset(&desc, 0, sizeof(desc));
-
-	desc.dwSize = sizeof(desc);
-	desc.dwFlags = DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT | DDSD_CAPS;
-
-	desc.dwWidth = width;
-	desc.dwHeight = height;
-
-	desc.ddsCaps.dwCaps = DDSCAPS_TEXTURE;
-	desc.ddpfPixelFormat.dwSize = sizeof(desc.ddpfPixelFormat);
-				
-	desc.ddpfPixelFormat.dwFlags |= DDPF_FOURCC;
-
-	desc.ddpfPixelFormat.dwFourCC = (uint32_t)PIXEL_FMT_FOURCC('D', 'X', '1', '0');
-	desc.ddpfPixelFormat.dwRGBBitCount = 0;
-	
-	const uint32_t pixel_format_bpp = 8;
-
-	desc.lPitch = (((desc.dwWidth + 3) & ~3) * ((desc.dwHeight + 3) & ~3) * pixel_format_bpp) >> 3;
-	desc.dwFlags |= DDSD_LINEARSIZE;
-
-	fwrite(&desc, sizeof(desc), 1, pFile);
-		
-	DDS_HEADER_DXT10 hdr10;
-	memset(&hdr10, 0, sizeof(hdr10));
-
-	// Not all tools support DXGI_FORMAT_BC7_UNORM_SRGB (like NVTT), but ddsview in DirectXTex pays attention to it. So not sure what to do here.
-	// For best compatibility just write DXGI_FORMAT_BC7_UNORM.
-	//hdr10.dxgiFormat = srgb ? DXGI_FORMAT_BC7_UNORM_SRGB : DXGI_FORMAT_BC7_UNORM;
-	hdr10.dxgiFormat = DXGI_FORMAT_BC7_UNORM;
-	hdr10.resourceDimension = D3D10_RESOURCE_DIMENSION_TEXTURE2D;
-	hdr10.arraySize = 1;
-
-	fwrite(&hdr10, sizeof(hdr10), 1, pFile);
-
-	fwrite(pBlocks, desc.lPitch, 1, pFile);
-
-	if (fclose(pFile) == EOF)
-	{
-		fprintf(stderr, "Failed writing to DDS file %s!\n", pFilename);
-		return false;
-	}
-
-	return true;
-}
-
 static void strip_extension(std::string &s)
 {
 	for (int32_t i = (int32_t)s.size() - 1; i >= 0; i--)
@@ -404,7 +336,7 @@ int main(int argc, char *argv[])
 
 	std::string src_filename;
 	std::string src_alpha_filename;
-	std::string dds_output_filename;
+	std::string tex_output_filename;
 	std::string png_output_filename;
 	std::string png_alpha_output_filename;
 	int uber_level = 3;
@@ -467,8 +399,8 @@ int main(int argc, char *argv[])
 		{
 			if (!src_filename.size())
 				src_filename = pArg;
-			else if (!dds_output_filename.size())
-				dds_output_filename = pArg;
+			else if (!tex_output_filename.size())
+				tex_output_filename = pArg;
 			else if (!png_output_filename.size())
 				png_output_filename = pArg;
 			else
@@ -485,13 +417,15 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	if (!dds_output_filename.size())
+	if (!tex_output_filename.size())
 	{
-		dds_output_filename = src_filename;
-		strip_extension(dds_output_filename);
+		tex_output_filename = src_filename;
+		strip_extension(tex_output_filename);
 		if (out_same_dir)
-			strip_path(dds_output_filename);
-		dds_output_filename += ".dds";
+			strip_path(tex_output_filename);
+
+		/// if output filename is not specified - force DDS container
+		tex_output_filename += ".dds";
 	}
 
 	if (!png_output_filename.size())
@@ -627,10 +561,15 @@ int main(int argc, char *argv[])
 		printf("Source image had an alpha channel.\n");
 	
 	bool failed = false;
-	if (!save_bc7_dds(dds_output_filename.c_str(), orig_width, orig_height, &packed_image[0], perceptual))
+	if (!save_bc7(tex_output_filename.c_str(), orig_width, orig_height, &packed_image[0], perceptual))
 		failed = true;
 	else
-		printf("Wrote DDS file %s\n", dds_output_filename.c_str());
+	{
+		std::string ext = get_file_extension(tex_output_filename.c_str());
+		std::transform(ext.begin(), ext.end(), ext.begin(),[](unsigned char c) { return std::toupper(c); });
+
+		printf("Wrote %s file %s\n", ext.c_str(), tex_output_filename.c_str());
+	}
 
 	if ((!no_output_png) && (png_output_filename.size()))
 	{

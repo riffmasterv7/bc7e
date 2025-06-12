@@ -41,13 +41,13 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
@@ -148,11 +148,14 @@
     <ClCompile Include="bc7decomp.c" />
     <ClCompile Include="bc7enc.cpp" />
     <ClCompile Include="lodepng.cpp" />
+    <ClCompile Include="tex_container.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="bc7decomp.h" />
     <ClInclude Include="dds_defs.h" />
+    <ClInclude Include="ktx_defs.h" />
     <ClInclude Include="lodepng.h" />
+    <ClInclude Include="tex_container.h" />
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="bc7e.ispc">
